@@ -76,6 +76,34 @@ petições. Duas limitações que vêm do pacote `juscraper`, não daqui:
 O CJPG devolveu vazio uma vez no meio de uma rajada de chamadas e voltou ao
 normal em seguida: o TJSP estrangula. Vazio sem erro é resultado possível.
 
+## 4.1 Varredura dos 24 tribunais (21/09/2026)
+
+`buscar_jurisprudencia` com a mesma busca em todos os tribunais do catálogo,
+a partir de um IP residencial brasileiro. **18 responderam, 6 não.**
+
+Responderam com ementas: `tjsp` `tjac` `tjal` `tjam` `tjba` `tjce` `tjdft`
+`tjes` `tjms` `tjpa` `tjpe` `tjpi` `tjpr` `tjrn` `tjrr` `tjsc` `tjrj` `tjrs`.
+
+| Tribunal | O que acontece | Causa |
+|---|---|---|
+| `tjmt` | `JSONDecodeError` | O site está em manutenção: `jurisprudencia.tjmt.jus.br/assets/config/config.json` devolve HTML ("Site em manutenção — TJMT") no lugar do JSON de configuração. Passageiro. |
+| `tjro` | `JSONDecodeError` | `juris-back.tjro.jus.br/search/varios` devolve a página "STIC — Página Bloqueada". Bloqueio do tribunal. |
+| `tjap` | `403` | `tucujuris.tjap.jus.br` recusa mesmo com user-agent de navegador. Bloqueio no WAF. |
+| `tjpb` | `403` | `pje-jurisprudencia.tjpb.jus.br`, idem. |
+| `tjto` | `403` | `jurisprudencia.tjto.jus.br/consulta.php` recusa o user-agent do juscraper, mas responde `202` com user-agent de navegador — o bloqueio é por user-agent. |
+| `tjgo` | 0 resultados, sem erro | O scraper do Projudi devolve DataFrame vazio, com e sem filtro de data. Falha silenciosa dentro do `juscraper`. |
+
+Nenhuma dessas falhas vem do wrapper MCP — são o pacote `juscraper` e os
+próprios tribunais. Repetidas 3 vezes, todas persistentes.
+
+**Vale repetir a varredura do servidor do Coolify**: quatro dessas falhas são
+bloqueio (`tjap`, `tjpb`, `tjro`, `tjto`) e podem depender do IP de origem. As
+outras duas (`tjmt` em manutenção, `tjgo` vazio) falham de qualquer lugar.
+
+O Datajud e o Comunica CNJ são APIs nacionais e cobrem todos os tribunais do
+país — os dois responderam normalmente, inclusive para tribunais que o
+scraping não alcança.
+
 ## 5. Atualizar
 
 O `pyproject.toml` pina o `juscraper` num commit. O upstream apontava para
