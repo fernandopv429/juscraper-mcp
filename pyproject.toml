@@ -9,7 +9,9 @@ authors = [{ name = "Julio Trecenti" }]
 dependencies = [
     "mcp>=1.12,<2",
     "uvicorn[standard]>=0.32",
-    "juscraper @ git+https://github.com/jtrecenti/juscraper@main",
+    # pin: o @main mudou o retorno do cpopg (DataFrame -> dict de seções) e quebrou o
+    # consultar_processo em produção. Subir a versão só junto com um smoke test.
+    "juscraper @ git+https://github.com/jtrecenti/juscraper@1d80e0237dfe66a99dc0fac21f91e292f12c7157",
 ]
 
 [build-system]

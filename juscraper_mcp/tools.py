@@ -18,7 +18,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from .registry import AGREGADORES, NAO_SUPORTADOS, TRIBUNAIS, validar_tribunal
-from .serialize import df_para_payload
+from .serialize import df_para_payload, secoes_para_payload
 from .server import logger, mcp
 from .settings import settings
 
@@ -227,6 +227,36 @@ async def buscar_julgados_primeira_instancia(
 # ---------------------------------------------------------------------------
 
 
+_AVISO_SEM_DADOS = (
+    "O tribunal respondeu, mas nada foi extraído para este processo. Costuma ser segredo de "
+    "justiça, número inexistente nessa instância ou processo físico (sem autos digitais). "
+    "Confira o número e, se consultou o 2º grau, tente instancia=1."
+)
+
+_AVISO_MOVIMENTACOES = (
+    "A seção 'movimentacoes' voltou vazia. Os andamentos do processo não foram extraídos — "
+    "use 'peticoes_diversas' (datas e tipos de petição) como aproximação do histórico."
+)
+
+
+def _payload_processo(resultado: Any) -> dict[str, Any]:
+    """Serializa o retorno do juscraper, que varia por método.
+
+    ``cpopg`` devolve um dict de DataFrames (uma chave por seção do processo);
+    ``cposg`` devolve um DataFrame único. Resultado vazio não é erro — vem com
+    aviso explicando o que costuma causar isso, para o modelo não insistir.
+    """
+    if isinstance(resultado, dict):
+        # 'file_path' é o caminho do HTML no diretório temporário do container: não diz nada
+        # ao modelo, custa tokens em toda linha e vaza o layout de disco do servidor.
+        resultado = {nome: df.drop(columns=["file_path"], errors="ignore") for nome, df in resultado.items()}
+        vazias = [nome for nome, df in resultado.items() if df is None or df.empty]
+        if len(vazias) == len(resultado):
+            return secoes_para_payload(resultado, aviso=_AVISO_SEM_DADOS)
+        return secoes_para_payload(resultado, aviso=_AVISO_MOVIMENTACOES if "movimentacoes" in vazias else None)
+    return df_para_payload(resultado, aviso=_AVISO_SEM_DADOS if resultado.empty else None)
+
+
 @mcp.tool(annotations=_READONLY)
 async def consultar_processo(
     numeros_processo: Annotated[
@@ -247,9 +277,11 @@ async def consultar_processo(
 ) -> dict[str, Any]:
     """Consulta os dados públicos de processos judiciais: partes, movimentações e metadados.
 
-    Cada linha do resultado é um registro do processo (a estrutura varia por tribunal — pode
-    haver várias linhas por processo, uma por movimentação ou parte). Para metadados rápidos de
-    qualquer tribunal do país, considere datajud_listar_processos, que é mais leve.
+    O formato da resposta varia com a instância. No 1º grau (cpopg) vem repartida em seções —
+    'basicos' (classe, assunto, vara, valor da causa), 'partes' (com advogados),
+    'movimentacoes' e 'peticoes_diversas' — cada uma com suas próprias colunas; olhe
+    'secoes_vazias' para saber o que não veio. No 2º grau (cposg) vem uma tabela única. Para
+    metadados rápidos de qualquer tribunal do país, considere datajud_listar_processos.
     """
     if not numeros_processo:
         raise ToolError("Informe ao menos um número de processo no formato CNJ.")
@@ -265,11 +297,11 @@ async def consultar_processo(
             partes = [scraper.cposg(n) for n in numeros]
             return pd.concat(partes, ignore_index=True) if partes else pd.DataFrame()
 
-        df = await _executar(f"processos 2º grau ({sigla})", _consultar_segundo_grau, numeros=numeros_processo)
+        resultado = await _executar(f"processos 2º grau ({sigla})", _consultar_segundo_grau, numeros=numeros_processo)
     else:
-        df = await _executar(f"processos 1º grau ({sigla})", scraper.cpopg, id_cnj=numeros_processo)
+        resultado = await _executar(f"processos 1º grau ({sigla})", scraper.cpopg, id_cnj=numeros_processo)
 
-    payload = df_para_payload(df)
+    payload = _payload_processo(resultado)
     payload["consulta"] = {"tribunal": sigla, "instancia": instancia, "numeros_processo": numeros_processo}
     return payload
 

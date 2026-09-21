@@ -37,9 +37,24 @@ class FakeScraper:
         self.chamadas.append(("cjpg", kwargs))
         return self._df()
 
+    def _secoes(self):
+        """O cpopg real devolve um dict de DataFrames, uma chave por seção do processo."""
+        return {
+            "basicos": pd.DataFrame(
+                {
+                    "file_path": ["/tmp/x/0000001.html"],
+                    "id_processo": ["0000001-02.2026.8.26.0100"],
+                    "classe": ["Procedimento Comum"],
+                }
+            ),
+            "partes": pd.DataFrame({"tipo": ["Reqte", "Reqdo"], "nome": ["Fulano", "Empresa S/A"]}),
+            "movimentacoes": pd.DataFrame(),
+            "peticoes_diversas": pd.DataFrame({"data": ["2026-01-02"], "tipo": ["Petição"]}),
+        }
+
     def cpopg(self, id_cnj):
         self.chamadas.append(("cpopg", id_cnj))
-        return self._df()
+        return self._secoes()
 
     def cposg(self, id_cnj):
         self.chamadas.append(("cposg", id_cnj))
@@ -203,3 +218,34 @@ async def test_comunica_cnj(fake):
         metodo, kwargs = fake.chamadas[0]
         assert metodo == "comunicacoes"
         assert kwargs["itens_por_pagina"] == 20
+
+
+async def test_consultar_processo_primeiro_grau_em_secoes(fake):
+    """O cpopg devolve dict de DataFrames — serializar como DataFrame quebrava a tool."""
+    async with create_connected_server_and_client_session(mcp._mcp_server) as client:
+        payload = _payload(
+            await client.call_tool(
+                "consultar_processo",
+                {"numeros_processo": ["0000001-02.2026.8.26.0100"], "tribunal": "tjsp", "instancia": 1},
+            )
+        )
+        assert payload["formato"] == "secoes"
+        assert payload["secoes"]["partes"]["linhas_retornadas"] == 2
+        assert payload["secoes"]["partes"]["resultados"][0]["nome"] == "Fulano"
+        assert payload["secoes_vazias"] == ["movimentacoes"]
+        assert "file_path" not in payload["secoes"]["basicos"]["colunas"]
+        assert "movimentacoes" in payload["aviso"]
+
+
+async def test_consultar_processo_sem_dados_avisa(fake, monkeypatch):
+    """Processo sem nada extraído não é erro, mas o modelo precisa saber o porquê."""
+    monkeypatch.setattr(fake, "cposg", lambda id_cnj: pd.DataFrame())
+    async with create_connected_server_and_client_session(mcp._mcp_server) as client:
+        payload = _payload(
+            await client.call_tool(
+                "consultar_processo",
+                {"numeros_processo": ["0000001-02.2026.8.26.0100"], "tribunal": "tjsp", "instancia": 2},
+            )
+        )
+        assert payload["linhas_retornadas"] == 0
+        assert "segredo de justiça" in payload["aviso"]

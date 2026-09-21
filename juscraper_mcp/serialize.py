@@ -67,3 +67,31 @@ def df_para_payload(
     if aviso:
         payload["aviso"] = aviso
     return payload
+
+
+def secoes_para_payload(
+    secoes: dict[str, pd.DataFrame],
+    *,
+    max_linhas: int | None = None,
+    max_chars: int | None = None,
+    aviso: str | None = None,
+) -> dict[str, Any]:
+    """Serializa um dict de DataFrames em seções nomeadas.
+
+    O ``cpopg`` do juscraper devolve o processo repartido em seções
+    (``basicos``, ``partes``, ``movimentacoes``, ``peticoes_diversas``) em vez
+    de um único DataFrame. Cada seção vira um payload completo, com os mesmos
+    cortes de linhas e de texto.
+    """
+    payload: dict[str, Any] = {
+        "formato": "secoes",
+        "secoes": {
+            str(nome): df_para_payload(df, max_linhas=max_linhas, max_chars=max_chars) for nome, df in secoes.items()
+        },
+    }
+    vazias = [nome for nome, sub in payload["secoes"].items() if not sub["linhas_retornadas"]]
+    if vazias:
+        payload["secoes_vazias"] = vazias
+    if aviso:
+        payload["aviso"] = aviso
+    return payload
