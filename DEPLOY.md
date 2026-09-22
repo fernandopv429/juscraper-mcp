@@ -104,6 +104,35 @@ O Datajud e o Comunica CNJ são APIs nacionais e cobrem todos os tribunais do
 país — os dois responderam normalmente, inclusive para tribunais que o
 scraping não alcança.
 
+## 4.2 Varredura em produção (21/09/2026)
+
+No ar em `https://juscraper.nexusdevhub.com` (Coolify, mesmo servidor do n8n).
+Repetindo a varredura contra o deploy — ou seja, com os tribunais vendo o IP do
+servidor em vez de um IP residencial: **16 dos 24 respondem**, contra 18 de
+casa. As diferenças:
+
+| Tribunal | De casa | Do servidor | Leitura |
+|---|---|---|---|
+| `tjes` | 20 ementas | `403` | **O IP do servidor está bloqueado.** Já falhou na primeira chamada, então é bloqueio prévio de faixa de datacenter, não consequência da varredura. |
+| `tjpa` | 25 ementas (1ª varredura) | timeout | Passou a dar timeout **dos dois lugares**. É o tribunal, não o IP. |
+| `tjap` | `403` genérico | mensagem clara | Do servidor o juscraper identifica a causa: **CAPTCHA Cloudflare Turnstile**. Mesmo caso do TJMG — fora do escopo por desenho, não é falha. |
+
+Respondem em produção (16): `tjsp` `tjac` `tjal` `tjam` `tjba` `tjce` `tjdft`
+`tjms` `tjpe` `tjpi` `tjpr` `tjrn` `tjrr` `tjsc` `tjrj` `tjrs`.
+
+Não respondem (8): `tjap` (Turnstile), `tjes` (IP bloqueado), `tjmt`
+(manutenção), `tjpa` (fora do ar), `tjpb` (403), `tjro` (bloqueio), `tjto`
+(403), `tjgo` (vazio silencioso).
+
+**Não baixe o `JUSMCP_SLEEP_TIME` nem suba a concorrência.** O `tjes` mostra o
+que acontece com IP de servidor: uma vez na lista de bloqueio do tribunal, some
+um tribunal inteiro do catálogo e não há como reverter do seu lado. De casa ele
+funciona; do servidor, não mais.
+
+`consultar_processo` foi conferido em produção no processo
+`1108672-79.2023.8.26.0002`: devolve `formato: secoes` com dados básicos, 3
+partes e 26 petições. É o build corrigido.
+
 ## 5. Atualizar
 
 O `pyproject.toml` pina o `juscraper` num commit. O upstream apontava para
