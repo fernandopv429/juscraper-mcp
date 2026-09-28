@@ -249,3 +249,57 @@ async def test_consultar_processo_sem_dados_avisa(fake, monkeypatch):
         )
         assert payload["linhas_retornadas"] == 0
         assert "segredo de justiça" in payload["aviso"]
+
+
+async def test_consultar_processo_so_o_numero_de_volta_avisa(fake, monkeypatch):
+    """Linha só com 'id_cnj' é falha do parser dos TRFs, não processo consultado."""
+    monkeypatch.setattr(fake, "cpopg", lambda id_cnj: pd.DataFrame({"id_cnj": ["50017789620254036183"]}))
+    async with create_connected_server_and_client_session(mcp._mcp_server) as client:
+        payload = _payload(
+            await client.call_tool(
+                "consultar_processo",
+                {"numeros_processo": ["5001778-96.2025.4.03.6183"], "tribunal": "trf3", "instancia": 1},
+            )
+        )
+        assert payload["linhas_retornadas"] == 1
+        assert "apenas o número consultado" in payload["aviso"]
+        assert "datajud_listar_processos" in payload["aviso"]
+
+
+async def test_consultar_processo_com_colunas_nulas_tambem_avisa(fake, monkeypatch):
+    """Mesmo caso, quando o parser devolve as demais colunas preenchidas com nulo."""
+    monkeypatch.setattr(
+        fake,
+        "cpopg",
+        lambda id_cnj: pd.DataFrame({"id_cnj": ["00051538420064058000"], "classe": [None], "partes": [None]}),
+    )
+    async with create_connected_server_and_client_session(mcp._mcp_server) as client:
+        payload = _payload(
+            await client.call_tool(
+                "consultar_processo",
+                {"numeros_processo": ["0005153-84.2006.4.05.8000"], "tribunal": "trf5", "instancia": 1},
+            )
+        )
+        assert "apenas o número consultado" in payload["aviso"]
+
+
+async def test_busca_vazia_avisa_que_vazio_nao_e_inexistencia(fake, monkeypatch):
+    """TJGO e TJPE devolvem zero sem erro — o modelo não pode ler isso como 'não existe'."""
+    monkeypatch.setattr(fake, "cjsg", lambda **kwargs: pd.DataFrame())
+    async with create_connected_server_and_client_session(mcp._mcp_server) as client:
+        payload = _payload(
+            await client.call_tool("buscar_jurisprudencia", {"tribunal": "tjgo", "pesquisa": "dano moral"})
+        )
+        assert payload["linhas_retornadas"] == 0
+        assert "NÃO conclua que não existe" in payload["aviso"]
+        assert "datajud_contar_processos" in payload["aviso"]
+
+
+async def test_busca_com_resultado_nao_leva_aviso(fake):
+    """O aviso é para o silêncio; busca que trouxe dado não deve carregar ruído."""
+    async with create_connected_server_and_client_session(mcp._mcp_server) as client:
+        payload = _payload(
+            await client.call_tool("buscar_jurisprudencia", {"tribunal": "tjsp", "pesquisa": "dano moral"})
+        )
+        assert payload["linhas_retornadas"] == 1
+        assert "aviso" not in payload

@@ -186,6 +186,7 @@ async def buscar_jurisprudencia(
     df = await _executar(f"jurisprudência ({sigla})", scraper.cjsg, pesquisa=pesquisa, paginas=intervalo, **filtros)
     payload = df_para_payload(df)
     payload["consulta"] = {"tribunal": sigla, "pesquisa": pesquisa, "paginas": list(intervalo), **filtros}
+    _avisar_se_vazio(payload)
     _hint_proxima_pagina(payload, intervalo)
     return payload
 
@@ -218,6 +219,7 @@ async def buscar_julgados_primeira_instancia(
     )
     payload = df_para_payload(df)
     payload["consulta"] = {"tribunal": sigla, "pesquisa": pesquisa, "paginas": list(intervalo), **filtros}
+    _avisar_se_vazio(payload)
     _hint_proxima_pagina(payload, intervalo)
     return payload
 
@@ -233,10 +235,44 @@ _AVISO_SEM_DADOS = (
     "Confira o número e, se consultou o 2º grau, tente instancia=1."
 )
 
+_AVISO_SO_ECO = (
+    "O tribunal não devolveu nada sobre este processo — a resposta traz apenas o número "
+    "consultado de volta. É assim que o juscraper sinaliza processo não encontrado, em segredo "
+    "de justiça, ou consulta barrada pela proteção anti-robô do sistema (hoje é o caso de todo "
+    "TRF3 e TRF5). Para metadados deste processo, use datajud_listar_processos com "
+    "numero_processo."
+)
+
+_AVISO_BUSCA_VAZIA = (
+    "Nenhum resultado — e isso tem duas leituras possíveis: ou a busca não teve correspondência, "
+    "ou o tribunal mudou o formato da resposta e o extrator não lê mais (acontece, e não vira "
+    "erro). NÃO conclua que não existe decisão sobre o tema. Tente outros termos, tente outro "
+    "tribunal, e para confirmar existência de processo use datajud_contar_processos, que "
+    "responde por todos os tribunais do país."
+)
+
 _AVISO_MOVIMENTACOES = (
     "A seção 'movimentacoes' voltou vazia. Os andamentos do processo não foram extraídos — "
     "use 'peticoes_diversas' (datas e tipos de petição) como aproximação do histórico."
 )
+
+
+def _so_eco_do_numero(df: pd.DataFrame) -> bool:
+    """Linha só com 'id_cnj' é como o parser dos TRFs diz que não conseguiu o processo.
+
+    Sem isto a resposta chega com status de sucesso e uma linha dentro, e o modelo lê como
+    se o processo tivesse sido consultado.
+    """
+    if df.empty or "id_cnj" not in df.columns:
+        return False
+    outras = df.drop(columns=["id_cnj"])
+    return outras.empty or bool(outras.isna().all().all())
+
+
+def _avisar_se_vazio(payload: dict[str, Any]) -> None:
+    """Busca sem resultado não é erro, mas também não é prova de que nada existe."""
+    if not payload.get("linhas_retornadas") and "aviso" not in payload:
+        payload["aviso"] = _AVISO_BUSCA_VAZIA
 
 
 def _payload_processo(resultado: Any) -> dict[str, Any]:
@@ -254,6 +290,8 @@ def _payload_processo(resultado: Any) -> dict[str, Any]:
         if len(vazias) == len(resultado):
             return secoes_para_payload(resultado, aviso=_AVISO_SEM_DADOS)
         return secoes_para_payload(resultado, aviso=_AVISO_MOVIMENTACOES if "movimentacoes" in vazias else None)
+    if _so_eco_do_numero(resultado):
+        return df_para_payload(resultado, aviso=_AVISO_SO_ECO)
     return df_para_payload(resultado, aviso=_AVISO_SEM_DADOS if resultado.empty else None)
 
 
@@ -454,6 +492,7 @@ async def datajud_listar_processos(
     )
     payload = df_para_payload(df)
     payload["consulta"] = {**filtros, "paginas": paginas, "tamanho_pagina": tamanho_pagina}
+    _avisar_se_vazio(payload)
     return payload
 
 
@@ -505,5 +544,6 @@ async def buscar_comunicacoes_cnj(
         "itens_por_pagina": itens_por_pagina,
         **filtros,
     }
+    _avisar_se_vazio(payload)
     _hint_proxima_pagina(payload, intervalo)
     return payload
